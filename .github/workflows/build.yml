@@ -20,7 +20,7 @@ jobs:
         with:
           repository: crazywhalecc/static-php-cli
           
-      - name: Setup Host PHP (Must be 8.4)
+      - name: Setup Host PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -29,23 +29,23 @@ jobs:
       - name: Sync Builder Dependencies
         run: composer update --no-dev --ignore-platform-reqs --no-interaction
         
-      - name: Fetch PHP Source Code
+      - name: Download PHP Source
+        # FIXED: Added --os and --arch here so the builder knows WHICH source to get
         run: |
           ./bin/spc download --with-php=${{ github.event.inputs.php_version }} \
           "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
-          --ignore-cache-sources --no-interaction
+          --os=android --arch=${{ github.event.inputs.arch }} --no-interaction
         
-      - name: Build Android Binary
+      - name: Compile Android Native Engine
         run: |
-          # Install QEMU for cross-platform checks
           sudo apt-get update && sudo apt-get install -y qemu-user-static
           
-          # Fix: Doctor no longer accepts --os flag
-          ./bin/spc doctor
+          # FIXED: Doctor now requires the OS and Arch to verify the NDK
+          ./bin/spc doctor --os=android --arch=${{ github.event.inputs.arch }}
           
-          # The build command STILL uses --os and --arch
+          # FIXED: Build command is now clean of OS/Arch flags
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
-          --build-cli --os=android --arch=${{ github.event.inputs.arch }} --no-interaction
+          --build-cli --no-interaction
           
       - name: Upload Finished Binary
         uses: actions/upload-artifact@v4
