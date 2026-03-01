@@ -6,6 +6,10 @@ on:
         description: 'PHP Version'
         required: true
         default: '8.4.18'
+      arch:
+        description: 'Architecture (aarch64 or arm)'
+        required: true
+        default: 'aarch64'
 
 jobs:
   compile:
@@ -30,10 +34,10 @@ jobs:
       - name: Compile Android Native Engine
         run: |
           ./bin/spc doctor --os=android
-          ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" --build-cli --os=android --arch=aarch64
+          ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" --build-cli --os=android --arch=${{ github.event.inputs.arch }}
           
       - name: Upload Compiled Binary
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ github.event.inputs.php_version }}
+          name: php-${{ github.event.inputs.php_version }}-${{ github.event.inputs.arch }}
           path: buildroot/bin/php
