@@ -1,0 +1,39 @@
+name: Build Android PHP
+on:
+  workflow_dispatch:
+    inputs:
+      php_version:
+        description: 'PHP Version'
+        required: true
+        default: '8.4.18'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SPC
+        uses: actions/checkout@v4
+        with:
+          repository: crazywhalecc/static-php-cli
+          
+      - name: Setup PHP Environment
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          
+      - name: Install SPC Builder
+        run: composer install --no-dev -a
+        
+      - name: Download PHP Source & Extensions
+        run: ./bin/spc download --with-php=${{ github.event.inputs.php_version }} "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session"
+        
+      - name: Compile Android Native Engine
+        run: |
+          ./bin/spc doctor --os=android
+          ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" --build-cli --os=android --arch=aarch64
+          
+      - name: Upload Compiled Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-${{ github.event.inputs.php_version }}
+          path: buildroot/bin/php
