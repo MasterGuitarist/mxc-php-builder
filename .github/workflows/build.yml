@@ -37,16 +37,17 @@ jobs:
           # 1. Prepare Environment
           sudo apt-get update && sudo apt-get install -y qemu-user-static
           
-          # 2. Download with MANDATORY fetch flags
-          # We use --shallow-clone to speed it up and ensure the lock is created
-          ./bin/spc download --with-php=${{ github.event.inputs.php_version }} \
-          "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
-          --shallow-clone --no-interaction
+          # 2. Download ONLY the core PHP source first to ensure [php-src] is locked
+          ./bin/spc download php-src --with-php=${{ github.event.inputs.php_version }} --no-interaction
           
-          # 3. Doctor to verify tools
+          # 3. Download the actual external libraries (NOT the internal extensions)
+          # Note: mbstring, pdo, etc. are INSIDE php-src, so we don't ask spc to download them separately
+          ./bin/spc download openssl,curl,zlib,sqlite --no-interaction
+          
+          # 4. Doctor check
           ./bin/spc doctor
           
-          # 4. Final Build
+          # 5. Final Build - We list the extensions here, and SPC pulls them from the locked php-src
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
           --build-cli --no-interaction
           
