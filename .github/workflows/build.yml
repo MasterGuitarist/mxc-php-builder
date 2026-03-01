@@ -37,19 +37,22 @@ jobs:
           # 1. Prepare Environment
           sudo apt-get update && sudo apt-get install -y qemu-user-static
           
-          # 2. Download ONLY the core PHP source first to ensure [php-src] is locked
-          ./bin/spc download php-src --with-php=${{ github.event.inputs.php_version }} --no-interaction
+          # 2. Download ONLY what is required for a CLI build
+          # We include micro because the tool's internal validator checks for it by default
+          ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ github.event.inputs.php_version }} --no-interaction
           
-          # 3. Download the actual external libraries (NOT the internal extensions)
-          # Note: mbstring, pdo, etc. are INSIDE php-src, so we don't ask spc to download them separately
-          ./bin/spc download openssl,curl,zlib,sqlite --no-interaction
+          # 3. Download mandatory external libraries for the extensions you want
+          ./bin/spc download openssl,curl,zlib,sqlite,libxml2,oniguruma --no-interaction
           
-          # 4. Doctor check
+          # 4. Doctor check (Verified: no flags needed here now)
           ./bin/spc doctor
           
-          # 5. Final Build - We list the extensions here, and SPC pulls them from the locked php-src
+          # 5. THE CRITICAL STEP: 
+          # We use --build-cli ONLY. 
+          # We DO NOT use --build-all or --build-micro, so it won't ask for those sources.
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
-          --build-cli --no-interaction
+          --build-cli \
+          --no-interaction
           
       - name: Upload Finished Binary
         uses: actions/upload-artifact@v4
