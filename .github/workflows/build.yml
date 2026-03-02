@@ -19,44 +19,59 @@ jobs:
           mkdir -p php-android/arm64-v8a
           mkdir -p php-android/armeabi-v7a
           
-          # Download 64-bit
-          echo "Downloading PHP ${{ inputs.php_version }} 64-bit..."
-          curl -L -o php64.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_aarch64.deb" || \
-          curl -L -o php64.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_aarch64.deb" || \
-          curl -L -o php64.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php_${{ inputs.php_version }}_aarch64.deb"
+          PHPVER="${{ inputs.php_version }}"
+          MAJOR=$(echo $PHPVER | cut -d. -f1)
+          MINOR=$(echo $PHPVER | cut -d. -f2)
           
-          # Download 32-bit
-          echo "Downloading PHP ${{ inputs.php_version }} 32-bit..."
-          curl -L -o php32.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_arm.deb" || \
-          curl -L -o php32.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_arm.deb" || \
-          curl -L -o php32.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php_${{ inputs.php_version }}_arm.deb"
+          echo "Downloading PHP $PHPVER for Android..."
           
-          # Extract 64-bit
-          if [ -f php64.deb ] && [ -s php64.deb ]; then
-            echo "Extracting 64-bit PHP..."
+          # Try different repo paths based on version
+          if [ "$MAJOR" = "8" ] && [ "$MINOR" -ge "4" ]; then
+            # PHP 8.4+ in main repo
+            curl -L -o php64.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${PHPVER}_aarch64.deb" || \
+            curl -L -o php64.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php_${PHPVER}_aarch64.deb"
+            
+            curl -L -o php32.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${PHPVER}_arm.deb" || \
+            curl -L -o php32.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php_${PHPVER}_arm.deb"
+          elif [ "$MAJOR" = "8" ] && [ "$MINOR" -ge "0" ]; then
+            # PHP 8.0-8.3 in php8 repo
+            curl -L -o php64.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${PHPVER}_aarch64.deb" || \
+            curl -L -o php64.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php8_${PHPVER}_aarch64.deb"
+            
+            curl -L -o php32.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${PHPVER}_arm.deb" || \
+            curl -L -o php32.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php8_${PHPVER}_arm.deb"
+          elif [ "$MAJOR" = "7" ]; then
+            # PHP 7.4 in php7 repo
+            curl -L -o php64.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${PHPVER}_aarch64.deb" || \
+            curl -L -o php64.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php7_${PHPVER}_aarch64.deb"
+            
+            curl -L -o php32.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${PHPVER}_arm.deb" || \
+            curl -L -o php32.deb "https://github.com/termux/termux-packages/releases/download/apt-android-7/php7_${PHPVER}_arm.deb"
+          fi
+          
+          # Check if downloads succeeded
+          if [ -f php64.deb ] && [ "$(stat -c%s php64.deb 2>/dev/null || stat -f%z php64.deb 2>/dev/null)" -gt 1000000 ]; then
+            echo "✅ 64-bit download successful"
             dpkg -x php64.deb extract64
             find extract64 -name php -type f -exec cp {} php-android/arm64-v8a/libphp.so \;
             chmod +x php-android/arm64-v8a/libphp.so
-            echo "✅ 64-bit PHP saved"
           else
-            echo "❌ 64-bit download failed"
+            echo "❌ 64-bit download failed for PHP $PHPVER"
           fi
           
-          # Extract 32-bit
-          if [ -f php32.deb ] && [ -s php32.deb ]; then
-            echo "Extracting 32-bit PHP..."
+          if [ -f php32.deb ] && [ "$(stat -c%s php32.deb 2>/dev/null || stat -f%z php32.deb 2>/dev/null)" -gt 1000000 ]; then
+            echo "✅ 32-bit download successful"
             dpkg -x php32.deb extract32
             find extract32 -name php -type f -exec cp {} php-android/armeabi-v7a/libphp.so \;
             chmod +x php-android/armeabi-v7a/libphp.so
-            echo "✅ 32-bit PHP saved"
           else
-            echo "❌ 32-bit download failed"
+            echo "❌ 32-bit download failed for PHP $PHPVER"
           fi
           
-      - name: Show files
+      - name: Show results
         run: |
           echo "Files downloaded:"
-          ls -la php-android/*/
+          find php-android -type f -exec ls -lh {} \;
           
       - name: Upload PHP Binaries
         uses: actions/upload-artifact@v4
