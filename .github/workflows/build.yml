@@ -38,21 +38,22 @@ jobs:
           if [ -f php64.deb ]; then
             FILE_SIZE=$(stat -c%s php64.deb 2>/dev/null || stat -f%z php64.deb 2>/dev/null)
             if [ "$FILE_SIZE" -gt 10000 ]; then
-              echo "✅ Download successful, size: $FILE_SIZE bytes"
+              echo "Download successful, size: $FILE_SIZE bytes"
               dpkg -x php64.deb extract64/
               if [ -f extract64/data/data/com.termux/files/usr/bin/php ]; then
                 cp extract64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
-                echo "✅ 64-bit PHP saved to output/jniLibs/arm64-v8a/libphp.so"
-                file output/jniLibs/arm64-v8a/libphp.so
+                echo "64-bit PHP saved to output/jniLibs/arm64-v8a/libphp.so"
+                echo "Binary info:"
+                file output/jniLibs/arm64-v8a/libphp.so || true
               else
-                echo "❌ PHP binary not found in package"
+                echo "PHP binary not found in package"
               fi
             else
-              echo "❌ Downloaded file is too small ($FILE_SIZE bytes)"
+              echo "Downloaded file is too small ($FILE_SIZE bytes)"
               rm php64.deb
             fi
           else
-            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm64"
+            echo "Failed to download PHP ${{ inputs.php_version }} for arm64"
           fi
           
       - name: Download 32-bit PHP
@@ -75,21 +76,22 @@ jobs:
           if [ -f php32.deb ]; then
             FILE_SIZE=$(stat -c%s php32.deb 2>/dev/null || stat -f%z php32.deb 2>/dev/null)
             if [ "$FILE_SIZE" -gt 10000 ]; then
-              echo "✅ Download successful, size: $FILE_SIZE bytes"
+              echo "Download successful, size: $FILE_SIZE bytes"
               dpkg -x php32.deb extract32/
               if [ -f extract32/data/data/com.termux/files/usr/bin/php ]; then
                 cp extract32/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
-                echo "✅ 32-bit PHP saved to output/jniLibs/armeabi-v7a/libphp.so"
-                file output/jniLibs/armeabi-v7a/libphp.so
+                echo "32-bit PHP saved to output/jniLibs/armeabi-v7a/libphp.so"
+                echo "Binary info:"
+                file output/jniLibs/armeabi-v7a/libphp.so || true
               else
-                echo "❌ PHP binary not found in package"
+                echo "PHP binary not found in package"
               fi
             else
-              echo "❌ Downloaded file is too small ($FILE_SIZE bytes)"
+              echo "Downloaded file is too small ($FILE_SIZE bytes)"
               rm php32.deb
             fi
           else
-            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm"
+            echo "Failed to download PHP ${{ inputs.php_version }} for arm"
           fi
           
       - name: Create README if downloads failed
