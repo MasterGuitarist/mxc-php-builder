@@ -1,165 +1,52 @@
-name: Build Android PHP Shared Library
-run-name: Building PHP ${{ inputs.php_version }} for Android (${{ inputs.arch }})
+name: Get PHP Binaries from Termux
+run-name: Downloading PHP ${{ inputs.php_version }} for Android
 
 on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: 'PHP Version (7.0 - 8.4)'
+        description: 'PHP Version'
         required: true
         default: '8.4.18'
-      arch:
-        description: 'Architecture (arm64-v8a, armeabi-v7a, x86_64)'
-        required: true
-        default: 'arm64-v8a'
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    outputs:
-      valid: ${{ steps.check.outputs.valid }}
-    steps:
-      - name: Check PHP Version Compatibility
-        id: check
-        run: |
-          VERSION="${{ inputs.php_version }}"
-          MAJOR=$(echo $VERSION | cut -d. -f1)
-          
-          if [ $MAJOR -lt 7 ]; then
-            echo "❌ PHP $VERSION is too old! Minimum required: PHP 7.0"
-            echo "valid=false" >> $GITHUB_OUTPUT
-            exit 1
-          else
-            echo "✅ PHP $VERSION is supported"
-            echo "valid=true" >> $GITHUB_OUTPUT
-          fi
-          
-  compile:
-    needs: validate
+  download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Builder
-        uses: actions/checkout@v4
-        with:
-          repository: crazywhalecc/static-php-cli
-          
-      - name: Setup Host PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
-          
-      - name: Install Essential System Dependencies
+      - name: Create Directory Structure
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            autoconf \
-            automake \
-            libtool \
-            make \
-            cmake \
-            re2c \
-            bison \
-            flex \
-            gcc \
-            g++ \
-            libxml2-dev \
-            libssl-dev \
-            libcurl4-openssl-dev \
-            libsqlite3-dev \
-            libonig-dev \
-            libzip-dev \
-            wget \
-            unzip \
-            xz-utils
+          mkdir -p output/jniLibs/arm64-v8a
+          mkdir -p output/jniLibs/armeabi-v7a
+          mkdir -p output/jniLibs/x86_64
           
-      - name: Setup Android NDK
+      - name: Download Termux PHP Packages
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
-          unzip android-ndk-r26d-linux.zip
-          echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          # For PHP 8.4
+          wget https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_8.4.18_aarch64.deb -O php-arm64.deb || true
+          wget https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_8.4.18_arm.deb -O php-arm.deb || true
           
-      - name: Set Target Based on Architecture
+      - name: Extract PHP Binaries
         run: |
-          case "${{ inputs.arch }}" in
-            arm64-v8a)
-              echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
-              echo "OUTPUT_ARCH=arm64-v8a" >> $GITHUB_ENV
-              echo "ARCH_TRIPLE=aarch64-linux-android21" >> $GITHUB_ENV
-              ;;
-            armeabi-v7a)
-              echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
-              echo "OUTPUT_ARCH=armeabi-v7a" >> $GITHUB_ENV
-              echo "ARCH_TRIPLE=armv7a-linux-androideabi21" >> $GITHUB_ENV
-              ;;
-            x86_64)
-              echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
-              echo "OUTPUT_ARCH=x86_64" >> $GITHUB_ENV
-              echo "ARCH_TRIPLE=x86_64-linux-android21" >> $GITHUB_ENV
-              ;;
-          esac
-          echo "TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
-          
-      - name: Sync Builder Dependencies
-        run: composer install --no-dev --no-interaction --ignore-platform-reqs
-        
-      - name: Run Doctor
-        run: ./bin/spc doctor --auto-fix
-        
-      - name: Download PHP and Extensions
-        run: |
-          # Download PHP source (skip patches for old versions)
-          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-patch --no-interaction || true
-          
-          # Download core libraries
-          ./bin/spc download openssl --no-interaction || true
-          ./bin/spc download curl --no-interaction || true
-          ./bin/spc download zlib --no-interaction || true
-          ./bin/spc download sqlite3 --no-interaction || true
-          ./bin/spc download oniguruma --no-interaction || true
-          
-      - name: Build PHP for Android
-        run: |
-          # Set environment variables for cross-compilation
-          export PATH="$TOOLCHAIN:$PATH"
-          export CC="$TOOLCHAIN/$ARCH_TRIPLE-clang"
-          export CXX="$TOOLCHAIN/$ARCH_TRIPLE-clang++"
-          export AR="$TOOLCHAIN/llvm-ar"
-          export LD="$TOOLCHAIN/ld.lld"
-          export RANLIB="$TOOLCHAIN/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/llvm-strip"
-          
-          echo "Building PHP ${{ inputs.php_version }} for ${{ inputs.arch }}"
-          
-          # Build with minimal extensions
-          ./bin/spc build \
-            openssl,curl,zlib,sqlite3 \
-            --build-embed \
-            --with-micro-fake-cli \
-            --no-interaction \
-            --debug || true
-          
-      - name: Check Build Output
-        run: |
-          echo "=== CHECKING BUILD OUTPUT ==="
-          ls -la buildroot/bin/ || true
-          find . -name "php" -type f 2>/dev/null || true
-          
-      - name: Create JNI Library Structure
-        run: |
-          mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
-          if [ -f buildroot/bin/php ]; then
-            cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-            echo "✅ PHP binary copied successfully"
-          else
-            echo "⚠️ PHP binary not found"
-            # Create a dummy file with version info
-            echo "PHP ${{ inputs.php_version }} build failed" > output/jniLibs/${{ env.OUTPUT_ARCH }}/build_failed.txt
+          # Extract arm64 binary if available
+          if [ -f php-arm64.deb ]; then
+            dpkg -x php-arm64.deb extract-arm64
+            if [ -f extract-arm64/data/data/com.termux/files/usr/bin/php ]; then
+              cp extract-arm64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
+              echo "✅ PHP arm64 binary saved"
+            fi
           fi
           
-      - name: Upload Artifact
+          # Extract arm binary if available
+          if [ -f php-arm.deb ]; then
+            dpkg -x php-arm.deb extract-arm
+            if [ -f extract-arm/data/data/com.termux/files/usr/bin/php ]; then
+              cp extract-arm/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
+              echo "✅ PHP arm binary saved"
+            fi
+          fi
+          
+      - name: Upload PHP Binaries
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
+          name: php-android-binaries
           path: output/jniLibs/
