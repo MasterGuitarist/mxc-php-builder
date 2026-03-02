@@ -7,9 +7,9 @@ on:
       php_version:
         description: 'PHP Version'
         required: true
-        default: '8.0.30'
+        default: '8.4.18'
       arch:
-        description: 'Architecture (aarch64 or x86_64)'
+        description: 'Architecture (aarch64 or arm)'
         required: true
         default: 'aarch64'
 
@@ -25,16 +25,17 @@ jobs:
       - name: Setup Host PHP
         uses: shivammathur/setup-php@v2
         with:
-          # THE FIX: Bumping the host builder to PHP 8.4
+          # CRITICAL: The builder tool itself now requires 8.4
           php-version: '8.4' 
           extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
           
       - name: Sync Builder Dependencies
-        # THE FIX: Added --ignore-platform-reqs so Composer doesn't block the build
+        # FIX: Added --ignore-platform-reqs to bypass lockfile version conflicts
         run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
       - name: Download and Build
         env:
+          # This triggers the MUSL cross-compiler which is required for Android compatibility
           SPC_BUILD_OS: linux
           SPC_BUILD_ARCH: ${{ github.event.inputs.arch }}
         run: |
@@ -44,13 +45,14 @@ jobs:
           # 2. Download Core Sources
           ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ github.event.inputs.php_version }} --no-interaction
           
-          # 3. Download Extension Libraries (oniguruma is required for mbstring)
+          # 3. Download Extension Libraries
           ./bin/spc download openssl,curl,zlib,sqlite,oniguruma --no-interaction
           
-          # 4. Auto-fix Environment (This downloads the musl-cross-make toolchain)
+          # 4. Auto-fix Environment (Downloads the musl-cross-make toolchain)
           ./bin/spc doctor --auto-fix
           
           # 5. Build FULLY STATIC Linux Musl Binary
+          # This binary bypasses Bionic libc and works directly with the Android Kernel
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
           --build-cli \
           --no-interaction
