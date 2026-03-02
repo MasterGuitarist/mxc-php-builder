@@ -39,15 +39,18 @@ jobs:
           case "${{ inputs.arch }}" in
             arm64-v8a)
               echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=aarch64-linux-android21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=arm64-v8a" >> $GITHUB_ENV
+              echo "BUILD_ARCH=64-bit" >> $GITHUB_ENV
               ;;
             armeabi-v7a)
               echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=armv7a-linux-androideabi21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=armeabi-v7a" >> $GITHUB_ENV
+              echo "BUILD_ARCH=32-bit" >> $GITHUB_ENV
               ;;
             x86_64)
               echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=x86_64-linux-android21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=x86_64" >> $GITHUB_ENV
+              echo "BUILD_ARCH=64-bit x86" >> $GITHUB_ENV
               ;;
           esac
           echo "TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
@@ -57,8 +60,13 @@ jobs:
         
       - name: Download and Build for Android
         run: |
-          ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ github.event.inputs.php_version }} --no-interaction
-          ./bin/spc download openssl,curl,zlib,sqlite,oniguruma --no-interaction
+          echo "Building for ${{ env.BUILD_ARCH }} architecture: ${{ inputs.arch }}"
+          
+          # Download PHP source
+          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
+          
+          # Download extension libraries
+          ./bin/spc download openssl,curl,zlib,sqlite3,oniguruma --no-interaction
           
           export PATH=$TOOLCHAIN:$PATH
           export CC=$TOOLCHAIN/clang
@@ -66,7 +74,8 @@ jobs:
           export AR=$TOOLCHAIN/llvm-ar
           export LD=$TOOLCHAIN/ld.lld
           
-          ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
+          # Build as shared library (.so)
+          ./bin/spc build "openssl,curl,zlib,sqlite3,oniguruma,mbstring,pdo,pdo_sqlite,fileinfo,session" \
             --build-embed \
             --with-micro-fake-cli \
             --cc=$CC \
@@ -78,8 +87,8 @@ jobs:
           
       - name: Create Android JNI Library Structure
         run: |
-          mkdir -p output/jniLibs/${{ inputs.arch }}
-          cp buildroot/bin/php output/jniLibs/${{ inputs.arch }}/libphp.so
+          mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
+          cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
           
       - name: Upload PHP Library
         uses: actions/upload-artifact@v4
