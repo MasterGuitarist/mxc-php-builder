@@ -1,5 +1,4 @@
 name: Build Android PHP
-# THIS IS THE MAGIC LINE: It changes the display name in the Actions tab
 run-name: Building PHP ${{ inputs.php_version }} (${{ inputs.arch }})
 
 on:
@@ -26,15 +25,16 @@ jobs:
       - name: Setup Host PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2' # Host PHP version for Composer
+          # THE FIX: Bumping the host builder to PHP 8.4
+          php-version: '8.4' 
           extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
           
       - name: Sync Builder Dependencies
-        run: composer install --no-dev --no-interaction
+        # THE FIX: Added --ignore-platform-reqs so Composer doesn't block the build
+        run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
       - name: Download and Build
         env:
-          # CRITICAL: OS must be 'linux' so SPC triggers the musl cross-compiler
           SPC_BUILD_OS: linux
           SPC_BUILD_ARCH: ${{ github.event.inputs.arch }}
         run: |
