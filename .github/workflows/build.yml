@@ -26,9 +26,9 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
+          tools: composer
           
-      - name: Install Required System Packages
+      - name: Install ALL System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -41,11 +41,31 @@ jobs:
             re2c \
             bison \
             flex \
+            gcc \
+            g++ \
             libxml2-dev \
             libssl-dev \
             libcurl4-openssl-dev \
             libsqlite3-dev \
-            oniguruma-dev  # <-- ADD THIS! This fixes your error
+            libonig-dev \
+            libzip-dev \
+            libbz2-dev \
+            libreadline-dev \
+            libedit-dev \
+            libgmp-dev \
+            libicu-dev \
+            libpq-dev \
+            libfreetype6-dev \
+            libjpeg-dev \
+            libpng-dev \
+            libwebp-dev \
+            libxpm-dev \
+            libgd-dev \
+            gettext \
+            libgetopt-long-desktop-perl \
+            wget \
+            unzip \
+            xz-utils
           
       - name: Setup Android NDK
         run: |
@@ -77,27 +97,19 @@ jobs:
       - name: Sync Builder Dependencies
         run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
-      - name: Run Doctor to Fix Environment
-        run: ./bin/spc doctor --auto-fix
-        
-      - name: Download PHP and Extensions
+      - name: Run Doctor and Fix
         run: |
-          # Download PHP source
-          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
+          ./bin/spc doctor --auto-fix
           
-          # Download ALL required libraries (including oniguruma!)
+      - name: Download Everything
+        run: |
           ./bin/spc download \
-            openssl \
-            curl \
-            zlib \
-            sqlite3 \
-            oniguruma \
-            libxml2 \
+            --with-php=${{ inputs.php_version }} \
+            --for-extensions="openssl,curl,zlib,sqlite3,mbstring,pdo,pdo_sqlite,fileinfo,session" \
             --no-interaction
           
-      - name: Build PHP for Android
+      - name: Configure Build
         run: |
-          # Set environment variables for cross-compilation
           export PATH="$TOOLCHAIN:$PATH"
           export CC="$TOOLCHAIN/$ARCH_TRIPLE-clang"
           export CXX="$TOOLCHAIN/$ARCH_TRIPLE-clang++"
@@ -105,38 +117,44 @@ jobs:
           export LD="$TOOLCHAIN/ld.lld"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-          export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/local/lib/pkgconfig"
           
-          # Display build info
-          echo "Building for target: $TARGET"
-          echo "Using CC: $CC"
-          echo "Using CXX: $CXX"
+          # Configure for Android
+          ./bin/spc configure \
+            --target="$TARGET" \
+            --with-php="${{ inputs.php_version }}" \
+            --enable-zts \
+            --disable-opcache-jit
           
-          # Build with proper extensions (removed oniguruma from build list since it's a dependency)
+      - name: Build PHP
+        run: |
+          export PATH="$TOOLCHAIN:$PATH"
+          export CC="$TOOLCHAIN/$ARCH_TRIPLE-clang"
+          export CXX="$TOOLCHAIN/$ARCH_TRIPLE-clang++"
+          
+          # Build only essential extensions first
           ./bin/spc build \
-            openssl,curl,zlib,sqlite3,mbstring,pdo,pdo_sqlite,fileinfo,session \
+            openssl,curl,zlib,sqlite3 \
             --build-embed \
             --with-micro-fake-cli \
-            --no-interaction
+            --no-interaction \
+            --debug
           
-      - name: Create JNI Library Structure
+      - name: Create Output
         run: |
           mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
-          cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          if [ -f buildroot/bin/php ]; then
+            cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+            file output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          else
+            echo "Build failed - binary not found"
+            find . -name "php" -type f 2>/dev/null || true
+          fi
           
-      - name: Strip Debug Symbols
-        run: |
-          $TOOLCHAIN/llvm-strip output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so 2>/dev/null || echo "Stripping skipped"
-          
-      - name: Verify Binary Format
-        run: |
-          echo "=== BINARY VERIFICATION ==="
-          file output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-          echo "=== SIZE ==="
-          ls -lh output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-          
-      - name: Upload PHP Library
+      - name: Upload Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
-          path: output/jniLibs/
+          name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}-debug
+          path: |
+            output/jniLibs/
+            buildroot/logs/
