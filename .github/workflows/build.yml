@@ -39,17 +39,14 @@ jobs:
           case "${{ inputs.arch }}" in
             arm64-v8a)
               echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=aarch64-linux-android21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=arm64-v8a" >> $GITHUB_ENV
               ;;
             armeabi-v7a)
               echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=armv7a-linux-androideabi21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=armeabi-v7a" >> $GITHUB_ENV
               ;;
             x86_64)
               echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
-              echo "TOOLCHAIN_PREFIX=x86_64-linux-android21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=x86_64" >> $GITHUB_ENV
               ;;
           esac
@@ -58,90 +55,41 @@ jobs:
       - name: Sync Builder Dependencies
         run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
-      - name: Download PHP and Extensions
+      - name: Download and Build
         run: |
-          # Download PHP source
-          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
-          
-          # Download extension libraries
+          # Download PHP source and extensions
+          ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ inputs.php_version }} --no-interaction
           ./bin/spc download openssl,curl,zlib,sqlite3,oniguruma --no-interaction
           
-      - name: Configure PHP Build for Android
-        run: |
           # Set Android toolchain
           export PATH=$TOOLCHAIN:$PATH
-          export CC=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang
-          export CXX=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang++
+          export CC=$TOOLCHAIN/$TARGET-clang
+          export CXX=$TOOLCHAIN/$TARGET-clang++
           export AR=$TOOLCHAIN/llvm-ar
           export LD=$TOOLCHAIN/ld.lld
-          export RANLIB=$TOOLCHAIN/llvm-ranlib
-          export STRIP=$TOOLCHAIN/llvm-strip
           
-          # Configure for Android
-          ./bin/spc configure \
+          # Build for Android
+          ./bin/spc build "openssl,curl,zlib,sqlite3,oniguruma,mbstring,pdo,pdo_sqlite,fileinfo,session" \
+            --build-embed \
+            --with-micro-fake-cli \
             --cc="$CC" \
             --cxx="$CXX" \
             --ar="$AR" \
             --ld="$LD" \
             --target="$TARGET" \
-            --with-php="${{ inputs.php_version }}" \
-            --enable-zts \
-            --disable-opcache-jit
+            --no-interaction
           
-      - name: Build PHP
-        run: |
-          export PATH=$TOOLCHAIN:$PATH
-          export CC=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang
-          export CXX=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang++
-          
-          # Build
-          make clean || true
-          make -j$(nproc)
-          
-      - name: Create Android JNI Library
+      - name: Create JNI Structure
         run: |
           mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
+          cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
           
-          # Create a simple wrapper
-          cat > sapi/cli/php.c << 'EOF'
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include "php.h"
-          #include "php_main.h"
-          #include "php_cli_server.h"
-          
-          int main(int argc, char *argv[]) {
-              return php_cli_main(argc, argv);
-          }
-EOF
-          
-          # Compile into .so
-          $TOOLCHAIN/$TOOLCHAIN_PREFIX-clang \
-            -o output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so \
-            -shared \
-            -fPIC \
-            -Wl,-soname,libphp.so \
-            -I. \
-            -I./main \
-            -I./Zend \
-            -I./TSRM \
-            main/.libs/libmain.a \
-            Zend/.libs/libzend.a \
-            TSRM/.libs/libtsrm.a \
-            ext/*/.libs/*.a \
-            -lc -lm -ldl -lresolv
-          
-      - name: Strip Debug Symbols
+      - name: Verify Binary
         run: |
-          $TOOLCHAIN/llvm-strip output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-          
-      - name: Verify Binary Format
-        run: |
-          echo "=== VERIFYING BINARY FORMAT ==="
+          echo "=== BINARY INFO ==="
           file output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-          readelf -h output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so 2>/dev/null | grep -E "Class|Machine" || echo "Binary verification skipped"
           
-      - name: Upload PHP Library
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
