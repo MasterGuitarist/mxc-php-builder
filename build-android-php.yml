@@ -1,0 +1,92 @@
+name: Build Android PHP Shared Library
+run-name: Building PHP ${{ inputs.php_version }} for Android (${{ inputs.arch }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      php_version:
+        description: 'PHP Version'
+        required: true
+        default: '8.4.18'
+      arch:
+        description: 'Architecture (arm64-v8a, armeabi-v7a, x86_64)'
+        required: true
+        default: 'arm64-v8a'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository: crazywhalecc/static-php-cli
+          
+      - name: Setup Host PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
+          
+      - name: Setup Android NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip android-ndk-r26d-linux.zip
+          echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          
+      - name: Set Target Triple Based on Architecture
+        run: |
+          case "${{ inputs.arch }}" in
+            arm64-v8a)
+              echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=arm64-v8a" >> $GITHUB_ENV
+              ;;
+            armeabi-v7a)
+              echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=armeabi-v7a" >> $GITHUB_ENV
+              ;;
+            x86_64)
+              echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
+              echo "OUTPUT_ARCH=x86_64" >> $GITHUB_ENV
+              ;;
+          esac
+          echo "TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
+          
+      - name: Sync Builder Dependencies
+        run: composer install --no-dev --no-interaction --ignore-platform-reqs
+        
+      - name: Download and Build for Android
+        run: |
+          # Download PHP source
+          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
+          
+          # Download extension libraries
+          ./bin/spc download openssl,curl,zlib,sqlite3,oniguruma --no-interaction
+          
+          export PATH=$TOOLCHAIN:$PATH
+          export CC=$TOOLCHAIN/clang
+          export CXX=$TOOLCHAIN/clang++
+          export AR=$TOOLCHAIN/llvm-ar
+          export LD=$TOOLCHAIN/ld.lld
+          
+          # Build as shared library (.so)
+          ./bin/spc build "openssl,curl,zlib,sqlite3,oniguruma,mbstring,pdo,pdo_sqlite,fileinfo,session" \
+            --build-embed \
+            --with-micro-fake-cli \
+            --cc=$CC \
+            --cxx=$CXX \
+            --ar=$AR \
+            --ld=$LD \
+            --target=$TARGET \
+            --no-interaction
+          
+      - name: Create Android JNI Library Structure
+        run: |
+          mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
+          cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          
+      - name: Upload PHP Library
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
+          path: output/jniLibs/
