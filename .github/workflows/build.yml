@@ -1,13 +1,16 @@
 name: Build Android PHP
+# THIS IS THE MAGIC LINE: It changes the display name in the Actions tab
+run-name: Building PHP ${{ inputs.php_version }} (${{ inputs.arch }})
+
 on:
   workflow_dispatch:
     inputs:
       php_version:
         description: 'PHP Version'
         required: true
-        default: '8.4.18'
+        default: '8.0.30'
       arch:
-        description: 'Architecture (aarch64 or arm)'
+        description: 'Architecture (aarch64 or x86_64)'
         required: true
         default: 'aarch64'
 
@@ -23,33 +26,31 @@ jobs:
       - name: Setup Host PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.2' # Host PHP version for Composer
           extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
           
       - name: Sync Builder Dependencies
-        run: composer update --no-dev --ignore-platform-reqs --no-interaction
+        run: composer install --no-dev --no-interaction
         
       - name: Download and Build
         env:
-          SPC_BUILD_OS: android
+          # CRITICAL: OS must be 'linux' so SPC triggers the musl cross-compiler
+          SPC_BUILD_OS: linux
           SPC_BUILD_ARCH: ${{ github.event.inputs.arch }}
         run: |
           # 1. Prepare Environment
           sudo apt-get update && sudo apt-get install -y qemu-user-static
           
-          # 2. Download ONLY what is required for a CLI build
-          # We include micro because the tool's internal validator checks for it by default
+          # 2. Download Core Sources
           ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ github.event.inputs.php_version }} --no-interaction
           
-          # 3. Download mandatory external libraries for the extensions you want
-          ./bin/spc download openssl,curl,zlib,sqlite,libxml2,oniguruma --no-interaction
+          # 3. Download Extension Libraries (oniguruma is required for mbstring)
+          ./bin/spc download openssl,curl,zlib,sqlite,oniguruma --no-interaction
           
-          # 4. Doctor check (Verified: no flags needed here now)
-          ./bin/spc doctor
+          # 4. Auto-fix Environment (This downloads the musl-cross-make toolchain)
+          ./bin/spc doctor --auto-fix
           
-          # 5. THE CRITICAL STEP: 
-          # We use --build-cli ONLY. 
-          # We DO NOT use --build-all or --build-micro, so it won't ask for those sources.
+          # 5. Build FULLY STATIC Linux Musl Binary
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
           --build-cli \
           --no-interaction
