@@ -1,5 +1,5 @@
 name: Get PHP Binaries from Termux
-run-name: Downloading PHP ${{ inputs.php_version }} for Android
+run-name: Downloading PHP ${{ inputs.php_version }} for Android (${{ inputs.arch }})
 
 on:
   workflow_dispatch:
@@ -8,45 +8,62 @@ on:
         description: 'PHP Version'
         required: true
         default: '8.4.18'
+      arch:
+        description: 'Architecture (arm64-v8a, armeabi-v7a, x86_64)'
+        required: true
+        default: 'arm64-v8a'
 
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
+      - name: Show Inputs
+        run: |
+          echo "Building PHP ${{ inputs.php_version }} for ${{ inputs.arch }}"
+          
       - name: Create Directory Structure
         run: |
-          mkdir -p output/jniLibs/arm64-v8a
-          mkdir -p output/jniLibs/armeabi-v7a
-          mkdir -p output/jniLibs/x86_64
+          mkdir -p output/jniLibs/${{ inputs.arch }}
           
-      - name: Download Termux PHP Packages
+      - name: Download Termux PHP Package
         run: |
-          # For PHP 8.4
-          wget https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_8.4.18_aarch64.deb -O php-arm64.deb || true
-          wget https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_8.4.18_arm.deb -O php-arm.deb || true
-          
-      - name: Extract PHP Binaries
-        run: |
-          # Extract arm64 binary if available
-          if [ -f php-arm64.deb ]; then
-            dpkg -x php-arm64.deb extract-arm64
-            if [ -f extract-arm64/data/data/com.termux/files/usr/bin/php ]; then
-              cp extract-arm64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
-              echo "✅ PHP arm64 binary saved"
-            fi
+          # Map architecture to Termux format
+          if [ "${{ inputs.arch }}" = "arm64-v8a" ]; then
+            TERMUX_ARCH="aarch64"
+          elif [ "${{ inputs.arch }}" = "armeabi-v7a" ]; then
+            TERMUX_ARCH="arm"
+          elif [ "${{ inputs.arch }}" = "x86_64" ]; then
+            TERMUX_ARCH="x86_64"
+          else
+            echo "Unknown architecture: ${{ inputs.arch }}"
+            exit 1
           fi
           
-          # Extract arm binary if available
-          if [ -f php-arm.deb ]; then
-            dpkg -x php-arm.deb extract-arm
-            if [ -f extract-arm/data/data/com.termux/files/usr/bin/php ]; then
-              cp extract-arm/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
-              echo "✅ PHP arm binary saved"
+          echo "Downloading PHP ${{ inputs.php_version }} for $TERMUX_ARCH..."
+          
+          # Try to download from Termux repo
+          URL="https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_${TERMUX_ARCH}.deb"
+          wget "$URL" -O php.deb || echo "Download failed"
+          
+      - name: Extract PHP Binary
+        run: |
+          if [ -f php.deb ]; then
+            dpkg -x php.deb extract/
+            if [ -f extract/data/data/com.termux/files/usr/bin/php ]; then
+              cp extract/data/data/com.termux/files/usr/bin/php output/jniLibs/${{ inputs.arch }}/libphp.so
+              echo "✅ PHP binary saved to output/jniLibs/${{ inputs.arch }}/libphp.so"
+              file output/jniLibs/${{ inputs.arch }}/libphp.so
+            else
+              echo "❌ PHP binary not found in package"
             fi
+          else
+            echo "❌ Download failed - PHP ${{ inputs.php_version }} may not be available for ${{ inputs.arch }}"
+            # Create a placeholder with error message
+            echo "PHP ${{ inputs.php_version }} not available for ${{ inputs.arch }}" > output/jniLibs/${{ inputs.arch }}/error.txt
           fi
           
-      - name: Upload PHP Binaries
+      - name: Upload PHP Binary
         uses: actions/upload-artifact@v4
         with:
-          name: php-android-binaries
+          name: php-${{ inputs.php_version }}-${{ inputs.arch }}
           path: output/jniLibs/
