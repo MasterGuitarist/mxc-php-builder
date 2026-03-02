@@ -34,23 +34,23 @@ jobs:
           unzip android-ndk-r26d-linux.zip
           echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
           
-      - name: Set Target Triple Based on Architecture
+      - name: Set Target Based on Architecture
         run: |
           case "${{ inputs.arch }}" in
             arm64-v8a)
               echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=aarch64-linux-android21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=arm64-v8a" >> $GITHUB_ENV
-              echo "BUILD_ARCH=64-bit" >> $GITHUB_ENV
               ;;
             armeabi-v7a)
               echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=armv7a-linux-androideabi21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=armeabi-v7a" >> $GITHUB_ENV
-              echo "BUILD_ARCH=32-bit" >> $GITHUB_ENV
               ;;
             x86_64)
               echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=x86_64-linux-android21" >> $GITHUB_ENV
               echo "OUTPUT_ARCH=x86_64" >> $GITHUB_ENV
-              echo "BUILD_ARCH=64-bit x86" >> $GITHUB_ENV
               ;;
           esac
           echo "TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
@@ -58,37 +58,82 @@ jobs:
       - name: Sync Builder Dependencies
         run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
-      - name: Download and Build for Android
+      - name: Configure PHP Build for Android
         run: |
-          echo "Building for ${{ env.BUILD_ARCH }} architecture: ${{ inputs.arch }}"
-          
           # Download PHP source
           ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
           
           # Download extension libraries
           ./bin/spc download openssl,curl,zlib,sqlite3,oniguruma --no-interaction
           
+          # Set Android toolchain
           export PATH=$TOOLCHAIN:$PATH
-          export CC=$TOOLCHAIN/clang
-          export CXX=$TOOLCHAIN/clang++
+          export CC=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang
+          export CXX=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang++
           export AR=$TOOLCHAIN/llvm-ar
           export LD=$TOOLCHAIN/ld.lld
+          export RANLIB=$TOOLCHAIN/llvm-ranlib
+          export STRIP=$TOOLCHAIN/llvm-strip
           
-          # Build as shared library (.so)
-          ./bin/spc build "openssl,curl,zlib,sqlite3,oniguruma,mbstring,pdo,pdo_sqlite,fileinfo,session" \
-            --build-embed \
-            --with-micro-fake-cli \
+          # Configure for Android - THIS IS CRITICAL
+          ./bin/spc configure \
             --cc=$CC \
             --cxx=$CXX \
             --ar=$AR \
             --ld=$LD \
             --target=$TARGET \
-            --no-interaction
+            --with-php=${{ inputs.php_version }} \
+            --enable-zts \
+            --disable-opcache-jit
           
-      - name: Create Android JNI Library Structure
+      - name: Build PHP as Static Library
+        run: |
+          export PATH=$TOOLCHAIN:$PATH
+          export CC=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang
+          export CXX=$TOOLCHAIN/$TOOLCHAIN_PREFIX-clang++
+          
+          # Build static library (not executable)
+          make clean || true
+          make -j$(nproc) install-cli
+          
+      - name: Create Android JNI Library
         run: |
           mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
-          cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          
+          # The build creates libphp.a (static library) - we need to create a wrapper
+          # Create a small wrapper that will be our .so
+          cat > php_wrapper.c << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+// This wrapper will become our .so that Android can load
+int main(int argc, char *argv[]) {
+    // Execute the real PHP binary from our static build
+    extern int php_cli_main(int argc, char *argv[]);
+    return php_cli_main(argc, argv);
+}
+EOF
+
+          # Compile wrapper with static PHP library
+          $TOOLCHAIN/$TOOLCHAIN_PREFIX-clang \
+            -o output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so \
+            php_wrapper.c \
+            -L./install/lib \
+            -lphp \
+            -Wl,-soname,libphp.so \
+            -shared \
+            -fPIC
+          
+      - name: Strip Debug Symbols
+        run: |
+          $TOOLCHAIN/llvm-strip output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          
+      - name: Verify ELF Format
+        run: |
+          echo "=== VERIFYING BINARY FORMAT ==="
+          file output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+          readelf -h output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so | grep -E "Class|Machine"
           
       - name: Upload PHP Library
         uses: actions/upload-artifact@v4
