@@ -63,9 +63,9 @@ jobs:
           ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction
           ./bin/spc download openssl,curl,zlib,sqlite3,oniguruma --no-interaction
           
-      - name: Build PHP for Android (NO --cc OPTION)
+      - name: Build PHP for Android
         run: |
-          # Set environment variables for the build
+          # Set environment variables for cross-compilation
           export PATH="$TOOLCHAIN:$PATH"
           export CC="$TOOLCHAIN/$ARCH_TRIPLE-clang"
           export CXX="$TOOLCHAIN/$ARCH_TRIPLE-clang++"
@@ -74,31 +74,34 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
           
-          # These environment variables will be picked up by the build system
+          # Display build info
+          echo "Building for target: $TARGET"
           echo "Using CC: $CC"
           echo "Using CXX: $CXX"
-          echo "Target: $TARGET"
           
-          # Build - NO --cc option, just use environment variables
+          # Build with proper flags
           ./bin/spc build "openssl,curl,zlib,sqlite3,oniguruma,mbstring,pdo,pdo_sqlite,fileinfo,session" \
             --build-embed \
             --with-micro-fake-cli \
-            --target="$TARGET" \
             --no-interaction
           
-      - name: Create JNI Structure
+      - name: Create JNI Library Structure
         run: |
           mkdir -p output/jniLibs/${{ env.OUTPUT_ARCH }}
           cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
           
-      - name: Verify Binary
+      - name: Strip Debug Symbols
         run: |
-          echo "=== BINARY INFO ==="
+          $TOOLCHAIN/llvm-strip output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so 2>/dev/null || echo "Stripping skipped"
+          
+      - name: Verify Binary Format
+        run: |
+          echo "=== BINARY VERIFICATION ==="
           file output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
           echo "=== SIZE ==="
           ls -lh output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
           
-      - name: Upload Artifact
+      - name: Upload PHP Library
         uses: actions/upload-artifact@v4
         with:
           name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
