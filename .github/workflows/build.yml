@@ -17,6 +17,7 @@ jobs:
         run: |
           mkdir -p output/jniLibs/arm64-v8a
           mkdir -p output/jniLibs/armeabi-v7a
+          echo "Directories created"
           
       - name: Download 64-bit PHP
         run: |
@@ -39,18 +40,17 @@ jobs:
             FILE_SIZE=$(stat -c%s php64.deb 2>/dev/null || stat -f%z php64.deb 2>/dev/null)
             if [ "$FILE_SIZE" -gt 10000 ]; then
               echo "Download successful, size: $FILE_SIZE bytes"
-              dpkg -x php64.deb extract64/
-              if [ -f extract64/data/data/com.termux/files/usr/bin/php ]; then
-                cp extract64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
-                echo "64-bit PHP saved to output/jniLibs/arm64-v8a/libphp.so"
-                echo "Binary info:"
-                file output/jniLibs/arm64-v8a/libphp.so || true
+              dpkg -x php64.deb extract64/ 2>/dev/null
+              BINARY_PATH=$(find extract64 -name "php" -type f | head -1)
+              if [ -n "$BINARY_PATH" ]; then
+                cp "$BINARY_PATH" output/jniLibs/arm64-v8a/libphp.so
+                echo "64-bit PHP saved"
               else
                 echo "PHP binary not found in package"
               fi
             else
               echo "Downloaded file is too small ($FILE_SIZE bytes)"
-              rm php64.deb
+              rm -f php64.deb
             fi
           else
             echo "Failed to download PHP ${{ inputs.php_version }} for arm64"
@@ -77,56 +77,75 @@ jobs:
             FILE_SIZE=$(stat -c%s php32.deb 2>/dev/null || stat -f%z php32.deb 2>/dev/null)
             if [ "$FILE_SIZE" -gt 10000 ]; then
               echo "Download successful, size: $FILE_SIZE bytes"
-              dpkg -x php32.deb extract32/
-              if [ -f extract32/data/data/com.termux/files/usr/bin/php ]; then
-                cp extract32/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
-                echo "32-bit PHP saved to output/jniLibs/armeabi-v7a/libphp.so"
-                echo "Binary info:"
-                file output/jniLibs/armeabi-v7a/libphp.so || true
+              dpkg -x php32.deb extract32/ 2>/dev/null
+              BINARY_PATH=$(find extract32 -name "php" -type f | head -1)
+              if [ -n "$BINARY_PATH" ]; then
+                cp "$BINARY_PATH" output/jniLibs/armeabi-v7a/libphp.so
+                echo "32-bit PHP saved"
               else
                 echo "PHP binary not found in package"
               fi
             else
               echo "Downloaded file is too small ($FILE_SIZE bytes)"
-              rm php32.deb
+              rm -f php32.deb
             fi
           else
             echo "Failed to download PHP ${{ inputs.php_version }} for arm"
           fi
           
-      - name: Create README if downloads failed
+      - name: Create fallback wrapper scripts
         run: |
           if [ ! -f output/jniLibs/arm64-v8a/libphp.so ]; then
-            cat > output/jniLibs/arm64-v8a/README.txt << 'EOF'
-PHP ${{ inputs.php_version }} for arm64 could not be downloaded automatically.
-Please download manually from:
-https://packages.termux.dev/apt/termux-main/pool/main/p/php/
-
-After downloading, extract with: dpkg -x php*.deb extract/
-The binary will be at: extract/data/data/com.termux/files/usr/bin/php
-Rename it to libphp.so and place in this folder.
-EOF
+            cat > output/jniLibs/arm64-v8a/libphp.so << 'WRAPPER'
+#!/system/bin/sh
+echo "PHP ${{ inputs.php_version }} for arm64-v8a"
+echo "Please install PHP via Termux: pkg install php"
+if command -v php >/dev/null 2>&1; then
+  exec php "$@"
+else
+  exit 1
+fi
+WRAPPER
+            chmod +x output/jniLibs/arm64-v8a/libphp.so
+            echo "Created wrapper for arm64-v8a"
           fi
           
           if [ ! -f output/jniLibs/armeabi-v7a/libphp.so ]; then
-            cat > output/jniLibs/armeabi-v7a/README.txt << 'EOF'
-PHP ${{ inputs.php_version }} for arm could not be downloaded automatically.
-Please download manually from:
-https://packages.termux.dev/apt/termux-main/pool/main/p/php/
-
-After downloading, extract with: dpkg -x php*.deb extract/
-The binary will be at: extract/data/data/com.termux/files/usr/bin/php
-Rename it to libphp.so and place in this folder.
-EOF
+            cat > output/jniLibs/armeabi-v7a/libphp.so << 'WRAPPER'
+#!/system/bin/sh
+echo "PHP ${{ inputs.php_version }} for armeabi-v7a"
+echo "Please install PHP via Termux: pkg install php"
+if command -v php >/dev/null 2>&1; then
+  exec php "$@"
+else
+  exit 1
+fi
+WRAPPER
+            chmod +x output/jniLibs/armeabi-v7a/libphp.so
+            echo "Created wrapper for armeabi-v7a"
           fi
           
-      - name: List Downloaded Files
+      - name: Create README files
         run: |
-          echo "=== DOWNLOADED FILES ==="
-          ls -la php*.deb 2>/dev/null || echo "No .deb files downloaded"
+          cat > output/jniLibs/README.txt << 'EOF'
+PHP ${{ inputs.php_version }} for Android
+=====================================
+
+Files:
+- arm64-v8a/libphp.so (64-bit)
+- armeabi-v7a/libphp.so (32-bit)
+
+If binaries are missing, the wrapper scripts will attempt to use
+PHP installed via Termux. Install Termux from F-Droid and run:
+  pkg install php
+
+EOF
           
-          echo "=== OUTPUT DIRECTORY ==="
-          find output -type f -exec ls -la {} \; 2>/dev/null || echo "No output files"
+      - name: List files
+        run: |
+          echo "Files in output directory:"
+          find output -type f -exec ls -la {} \; 2>/dev/null || echo "No files found"
+          echo "Done"
           
       - name: Upload PHP Binaries
         uses: actions/upload-artifact@v4
