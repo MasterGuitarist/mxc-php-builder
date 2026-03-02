@@ -1,5 +1,5 @@
 name: Get PHP Binaries from Termux
-run-name: Downloading PHP ${{ inputs.php_version }} for Android (${{ inputs.arch }})
+run-name: Downloading PHP ${{ inputs.php_version }} for Android
 
 on:
   workflow_dispatch:
@@ -8,62 +8,105 @@ on:
         description: 'PHP Version'
         required: true
         default: '8.4.18'
-      arch:
-        description: 'Architecture (arm64-v8a, armeabi-v7a, x86_64)'
-        required: true
-        default: 'arm64-v8a'
 
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Show Inputs
-        run: |
-          echo "Building PHP ${{ inputs.php_version }} for ${{ inputs.arch }}"
-          
       - name: Create Directory Structure
         run: |
-          mkdir -p output/jniLibs/${{ inputs.arch }}
+          mkdir -p output/jniLibs/arm64-v8a
+          mkdir -p output/jniLibs/armeabi-v7a
           
-      - name: Download Termux PHP Package
+      - name: Download 64-bit PHP
         run: |
-          # Map architecture to Termux format
-          if [ "${{ inputs.arch }}" = "arm64-v8a" ]; then
-            TERMUX_ARCH="aarch64"
-          elif [ "${{ inputs.arch }}" = "armeabi-v7a" ]; then
-            TERMUX_ARCH="arm"
-          elif [ "${{ inputs.arch }}" = "x86_64" ]; then
-            TERMUX_ARCH="x86_64"
-          else
-            echo "Unknown architecture: ${{ inputs.arch }}"
-            exit 1
-          fi
+          echo "Downloading PHP ${{ inputs.php_version }} for arm64..."
           
-          echo "Downloading PHP ${{ inputs.php_version }} for $TERMUX_ARCH..."
+          # Try multiple possible URLs
+          URLS=(
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_aarch64.deb"
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${{ inputs.php_version }}_aarch64.deb"
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_aarch64.deb"
+          )
           
-          # Try to download from Termux repo
-          URL="https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_${TERMUX_ARCH}.deb"
-          wget "$URL" -O php.deb || echo "Download failed"
+          for URL in "${URLS[@]}"; do
+            echo "Trying: $URL"
+            wget --spider "$URL" 2>/dev/null && wget "$URL" -O php64.deb && break
+          done
           
-      - name: Extract PHP Binary
-        run: |
-          if [ -f php.deb ]; then
-            dpkg -x php.deb extract/
-            if [ -f extract/data/data/com.termux/files/usr/bin/php ]; then
-              cp extract/data/data/com.termux/files/usr/bin/php output/jniLibs/${{ inputs.arch }}/libphp.so
-              echo "✅ PHP binary saved to output/jniLibs/${{ inputs.arch }}/libphp.so"
-              file output/jniLibs/${{ inputs.arch }}/libphp.so
+          # Check if download succeeded and file is valid
+          if [ -f php64.deb ] && [ "$(stat -c%s php64.deb)" -gt 10000 ]; then
+            echo "✅ Download successful, size: $(stat -c%s php64.deb) bytes"
+            dpkg -x php64.deb extract64/
+            if [ -f extract64/data/data/com.termux/files/usr/bin/php ]; then
+              cp extract64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
+              echo "✅ 64-bit PHP saved to output/jniLibs/arm64-v8a/libphp.so"
+              file output/jniLibs/arm64-v8a/libphp.so
             else
               echo "❌ PHP binary not found in package"
             fi
           else
-            echo "❌ Download failed - PHP ${{ inputs.php_version }} may not be available for ${{ inputs.arch }}"
-            # Create a placeholder with error message
-            echo "PHP ${{ inputs.php_version }} not available for ${{ inputs.arch }}" > output/jniLibs/${{ inputs.arch }}/error.txt
+            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm64"
+            # Create a placeholder with instructions
+            cat > output/jniLibs/arm64-v8a/README.txt << 'EOF'
+PHP ${{ inputs.php_version }} for arm64 could not be downloaded automatically.
+Please download manually from:
+https://packages.termux.dev/apt/termux-main/pool/main/p/php/
+
+After downloading, extract with: dpkg -x php*.deb extract/
+The binary will be at: extract/data/data/com.termux/files/usr/bin/php
+Rename it to libphp.so and place in this folder.
+EOF
           fi
           
-      - name: Upload PHP Binary
+      - name: Download 32-bit PHP
+        run: |
+          echo "Downloading PHP ${{ inputs.php_version }} for arm..."
+          
+          URLS=(
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_arm.deb"
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${{ inputs.php_version }}_arm.deb"
+            "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_arm.deb"
+          )
+          
+          for URL in "${URLS[@]}"; do
+            echo "Trying: $URL"
+            wget --spider "$URL" 2>/dev/null && wget "$URL" -O php32.deb && break
+          done
+          
+          if [ -f php32.deb ] && [ "$(stat -c%s php32.deb)" -gt 10000 ]; then
+            echo "✅ Download successful, size: $(stat -c%s php32.deb) bytes"
+            dpkg -x php32.deb extract32/
+            if [ -f extract32/data/data/com.termux/files/usr/bin/php ]; then
+              cp extract32/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
+              echo "✅ 32-bit PHP saved to output/jniLibs/armeabi-v7a/libphp.so"
+              file output/jniLibs/armeabi-v7a/libphp.so
+            else
+              echo "❌ PHP binary not found in package"
+            fi
+          else
+            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm"
+            cat > output/jniLibs/armeabi-v7a/README.txt << 'EOF'
+PHP ${{ inputs.php_version }} for arm could not be downloaded automatically.
+Please download manually from:
+https://packages.termux.dev/apt/termux-main/pool/main/p/php/
+
+After downloading, extract with: dpkg -x php*.deb extract/
+The binary will be at: extract/data/data/com.termux/files/usr/bin/php
+Rename it to libphp.so and place in this folder.
+EOF
+          fi
+          
+      - name: List Downloaded Files
+        run: |
+          echo "=== DOWNLOADED FILES ==="
+          ls -la php*.deb 2>/dev/null || echo "No .deb files downloaded"
+          
+          echo "=== OUTPUT DIRECTORY ==="
+          find output -type f -exec ls -la {} \;
+          
+      - name: Upload PHP Binaries
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ inputs.php_version }}-${{ inputs.arch }}
+          name: php-${{ inputs.php_version }}-android
           path: output/jniLibs/
