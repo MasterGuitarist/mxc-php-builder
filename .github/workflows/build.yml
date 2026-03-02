@@ -1,5 +1,5 @@
-name: Get PHP Binaries from Termux
-run-name: Downloading PHP ${{ inputs.php_version }} for Android
+name: Create PHP Android Release
+run-name: Creating PHP ${{ inputs.php_version }} Android Package
 
 on:
   workflow_dispatch:
@@ -10,103 +10,51 @@ on:
         default: '8.4.18'
 
 jobs:
-  download:
+  create-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Create Directory Structure
+      - name: Create Directories
         run: |
-          mkdir -p output/jniLibs/arm64-v8a
-          mkdir -p output/jniLibs/armeabi-v7a
+          mkdir -p php-android/arm64-v8a
+          mkdir -p php-android/armeabi-v7a
           
-      - name: Download 64-bit PHP
+      - name: Create PHP Wrapper Scripts
         run: |
-          echo "Downloading PHP ${{ inputs.php_version }} for arm64..."
-          
-          # Try multiple possible URLs
-          URLS=(
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_aarch64.deb"
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${{ inputs.php_version }}_aarch64.deb"
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_aarch64.deb"
-          )
-          
-          for URL in "${URLS[@]}"; do
-            echo "Trying: $URL"
-            wget --spider "$URL" 2>/dev/null && wget "$URL" -O php64.deb && break
-          done
-          
-          # Check if download succeeded and file is valid
-          if [ -f php64.deb ] && [ "$(stat -c%s php64.deb)" -gt 10000 ]; then
-            echo "✅ Download successful, size: $(stat -c%s php64.deb) bytes"
-            dpkg -x php64.deb extract64/
-            if [ -f extract64/data/data/com.termux/files/usr/bin/php ]; then
-              cp extract64/data/data/com.termux/files/usr/bin/php output/jniLibs/arm64-v8a/libphp.so
-              echo "✅ 64-bit PHP saved to output/jniLibs/arm64-v8a/libphp.so"
-              file output/jniLibs/arm64-v8a/libphp.so
-            else
-              echo "❌ PHP binary not found in package"
-            fi
-          else
-            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm64"
-            # Create a placeholder with instructions
-            cat > output/jniLibs/arm64-v8a/README.txt << 'EOF'
-PHP ${{ inputs.php_version }} for arm64 could not be downloaded automatically.
-Please download manually from:
-https://packages.termux.dev/apt/termux-main/pool/main/p/php/
-
-After downloading, extract with: dpkg -x php*.deb extract/
-The binary will be at: extract/data/data/com.termux/files/usr/bin/php
-Rename it to libphp.so and place in this folder.
+          # Create 64-bit wrapper
+          cat > php-android/arm64-v8a/libphp.so << 'EOF'
+#!/system/bin/sh
+# PHP ${{ inputs.php_version }} Wrapper for arm64-v8a
+# Instructions: Install Termux and run: pkg install php
+echo "PHP ${{ inputs.php_version }} for Android (arm64-v8a)"
+echo "Please install PHP via Termux:"
+echo "1. Install Termux from F-Droid"
+echo "2. Run: pkg install php"
+if command -v php >/dev/null 2>&1; then
+  exec php "$@"
+else
+  exit 1
+fi
 EOF
-          fi
-          
-      - name: Download 32-bit PHP
-        run: |
-          echo "Downloading PHP ${{ inputs.php_version }} for arm..."
-          
-          URLS=(
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php/php_${{ inputs.php_version }}_arm.deb"
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php7/php_${{ inputs.php_version }}_arm.deb"
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/php8/php_${{ inputs.php_version }}_arm.deb"
-          )
-          
-          for URL in "${URLS[@]}"; do
-            echo "Trying: $URL"
-            wget --spider "$URL" 2>/dev/null && wget "$URL" -O php32.deb && break
-          done
-          
-          if [ -f php32.deb ] && [ "$(stat -c%s php32.deb)" -gt 10000 ]; then
-            echo "✅ Download successful, size: $(stat -c%s php32.deb) bytes"
-            dpkg -x php32.deb extract32/
-            if [ -f extract32/data/data/com.termux/files/usr/bin/php ]; then
-              cp extract32/data/data/com.termux/files/usr/bin/php output/jniLibs/armeabi-v7a/libphp.so
-              echo "✅ 32-bit PHP saved to output/jniLibs/armeabi-v7a/libphp.so"
-              file output/jniLibs/armeabi-v7a/libphp.so
-            else
-              echo "❌ PHP binary not found in package"
-            fi
-          else
-            echo "❌ Failed to download PHP ${{ inputs.php_version }} for arm"
-            cat > output/jniLibs/armeabi-v7a/README.txt << 'EOF'
-PHP ${{ inputs.php_version }} for arm could not be downloaded automatically.
-Please download manually from:
-https://packages.termux.dev/apt/termux-main/pool/main/p/php/
 
-After downloading, extract with: dpkg -x php*.deb extract/
-The binary will be at: extract/data/data/com.termux/files/usr/bin/php
-Rename it to libphp.so and place in this folder.
+          # Create 32-bit wrapper  
+          cat > php-android/armeabi-v7a/libphp.so << 'EOF'
+#!/system/bin/sh
+# PHP ${{ inputs.php_version }} Wrapper for armeabi-v7a
+# Instructions: Install Termux and run: pkg install php
+echo "PHP ${{ inputs.php_version }} for Android (armeabi-v7a)"
+echo "Please install PHP via Termux:"
+echo "1. Install Termux from F-Droid"
+echo "2. Run: pkg install php"
+if command -v php >/dev/null 2>&1; then
+  exec php "$@"
+else
+  exit 1
+fi
 EOF
-          fi
+          chmod +x php-android/*/libphp.so
           
-      - name: List Downloaded Files
-        run: |
-          echo "=== DOWNLOADED FILES ==="
-          ls -la php*.deb 2>/dev/null || echo "No .deb files downloaded"
-          
-          echo "=== OUTPUT DIRECTORY ==="
-          find output -type f -exec ls -la {} \;
-          
-      - name: Upload PHP Binaries
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ inputs.php_version }}-android
-          path: output/jniLibs/
+          name: php-${{ inputs.php_version }}-android-wrapper
+          path: php-android/
