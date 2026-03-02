@@ -1,5 +1,5 @@
-name: Build Android PHP
-run-name: Building PHP ${{ inputs.php_version }} (${{ inputs.arch }})
+name: Build Android PHP Shared Library
+run-name: Building PHP ${{ inputs.php_version }} for Android (${{ inputs.arch }})
 
 on:
   workflow_dispatch:
@@ -9,9 +9,9 @@ on:
         required: true
         default: '8.4.18'
       arch:
-        description: 'Architecture (aarch64 or arm)'
+        description: 'Architecture (arm64-v8a, armeabi-v7a, x86_64)'
         required: true
-        default: 'aarch64'
+        default: 'arm64-v8a'
 
 jobs:
   compile:
@@ -25,40 +25,64 @@ jobs:
       - name: Setup Host PHP
         uses: shivammathur/setup-php@v2
         with:
-          # CRITICAL: The builder tool itself now requires 8.4
-          php-version: '8.4' 
+          php-version: '8.4'
           extensions: mbstring, curl, openssl, tokenizer, xml, dom, pdo, sqlite3
           
+      - name: Setup Android NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip android-ndk-r26d-linux.zip
+          echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          
+      - name: Set Target Triple Based on Architecture
+        run: |
+          case "${{ inputs.arch }}" in
+            arm64-v8a)
+              echo "TARGET=aarch64-linux-android21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=aarch64-linux-android21" >> $GITHUB_ENV
+              ;;
+            armeabi-v7a)
+              echo "TARGET=armv7a-linux-androideabi21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=armv7a-linux-androideabi21" >> $GITHUB_ENV
+              ;;
+            x86_64)
+              echo "TARGET=x86_64-linux-android21" >> $GITHUB_ENV
+              echo "TOOLCHAIN_PREFIX=x86_64-linux-android21" >> $GITHUB_ENV
+              ;;
+          esac
+          echo "TOOLCHAIN=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
+          
       - name: Sync Builder Dependencies
-        # FIX: Added --ignore-platform-reqs to bypass lockfile version conflicts
         run: composer install --no-dev --no-interaction --ignore-platform-reqs
         
-      - name: Download and Build
-        env:
-          # This triggers the MUSL cross-compiler which is required for Android compatibility
-          SPC_BUILD_OS: linux
-          SPC_BUILD_ARCH: ${{ github.event.inputs.arch }}
+      - name: Download and Build for Android
         run: |
-          # 1. Prepare Environment
-          sudo apt-get update && sudo apt-get install -y qemu-user-static
-          
-          # 2. Download Core Sources
           ./bin/spc download php-src,micro,pkg-config,patch --with-php=${{ github.event.inputs.php_version }} --no-interaction
-          
-          # 3. Download Extension Libraries
           ./bin/spc download openssl,curl,zlib,sqlite,oniguruma --no-interaction
           
-          # 4. Auto-fix Environment (Downloads the musl-cross-make toolchain)
-          ./bin/spc doctor --auto-fix
+          export PATH=$TOOLCHAIN:$PATH
+          export CC=$TOOLCHAIN/clang
+          export CXX=$TOOLCHAIN/clang++
+          export AR=$TOOLCHAIN/llvm-ar
+          export LD=$TOOLCHAIN/ld.lld
           
-          # 5. Build FULLY STATIC Linux Musl Binary
-          # This binary bypasses Bionic libc and works directly with the Android Kernel
           ./bin/spc build "mbstring,openssl,pdo,pdo_sqlite,sqlite3,curl,zlib,fileinfo,session" \
-          --build-cli \
-          --no-interaction
+            --build-embed \
+            --with-micro-fake-cli \
+            --cc=$CC \
+            --cxx=$CXX \
+            --ar=$AR \
+            --ld=$LD \
+            --target=$TARGET \
+            --no-interaction
           
-      - name: Upload Finished Binary
+      - name: Create Android JNI Library Structure
+        run: |
+          mkdir -p output/jniLibs/${{ inputs.arch }}
+          cp buildroot/bin/php output/jniLibs/${{ inputs.arch }}/libphp.so
+          
+      - name: Upload PHP Library
         uses: actions/upload-artifact@v4
         with:
-          name: php-${{ github.event.inputs.php_version }}-${{ github.event.inputs.arch }}
-          path: buildroot/bin/php
+          name: php-${{ inputs.php_version }}-android-${{ inputs.arch }}
+          path: output/jniLibs/
