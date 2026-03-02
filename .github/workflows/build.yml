@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: 'PHP Version'
+        description: 'PHP Version (7.0 - 8.4)'
         required: true
         default: '8.4.18'
       arch:
@@ -14,7 +14,28 @@ on:
         default: 'arm64-v8a'
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      valid: ${{ steps.check.outputs.valid }}
+    steps:
+      - name: Check PHP Version Compatibility
+        id: check
+        run: |
+          VERSION="${{ inputs.php_version }}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          
+          if [ $MAJOR -lt 7 ]; then
+            echo "❌ PHP $VERSION is too old! Minimum required: PHP 7.0"
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ PHP $VERSION is supported"
+            echo "valid=true" >> $GITHUB_OUTPUT
+          fi
+          
   compile:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Builder
@@ -49,9 +70,6 @@ jobs:
             libsqlite3-dev \
             libonig-dev \
             libzip-dev \
-            libbz2-dev \
-            libreadline-dev \
-            libedit-dev \
             wget \
             unzip \
             xz-utils
@@ -91,8 +109,8 @@ jobs:
         
       - name: Download PHP and Extensions
         run: |
-          # Download PHP source
-          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-interaction || true
+          # Download PHP source (skip patches for old versions)
+          ./bin/spc download php-src --with-php=${{ inputs.php_version }} --no-patch --no-interaction || true
           
           # Download core libraries
           ./bin/spc download openssl --no-interaction || true
@@ -100,7 +118,6 @@ jobs:
           ./bin/spc download zlib --no-interaction || true
           ./bin/spc download sqlite3 --no-interaction || true
           ./bin/spc download oniguruma --no-interaction || true
-          ./bin/spc download libxml2 --no-interaction || true
           
       - name: Build PHP for Android
         run: |
@@ -112,13 +129,12 @@ jobs:
           export LD="$TOOLCHAIN/ld.lld"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-          export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/local/lib/pkgconfig"
           
           echo "Building PHP ${{ inputs.php_version }} for ${{ inputs.arch }}"
           
-          # Build with minimal extensions first
+          # Build with minimal extensions
           ./bin/spc build \
-            openssl,curl,zlib,sqlite3,mbstring,pdo,pdo_sqlite \
+            openssl,curl,zlib,sqlite3 \
             --build-embed \
             --with-micro-fake-cli \
             --no-interaction \
@@ -137,11 +153,9 @@ jobs:
             cp buildroot/bin/php output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
             echo "✅ PHP binary copied successfully"
           else
-            echo "⚠️ PHP binary not found, creating placeholder"
-            # Create a simple placeholder script for testing
-            echo '#!/system/bin/sh' > output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-            echo 'echo "PHP ${{ inputs.php_version }} for Android"' >> output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
-            chmod +x output/jniLibs/${{ env.OUTPUT_ARCH }}/libphp.so
+            echo "⚠️ PHP binary not found"
+            # Create a dummy file with version info
+            echo "PHP ${{ inputs.php_version }} build failed" > output/jniLibs/${{ env.OUTPUT_ARCH }}/build_failed.txt
           fi
           
       - name: Upload Artifact
